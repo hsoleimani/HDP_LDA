@@ -153,7 +153,19 @@ void StochVB(char* dataset, char* test_dataset, int kmax, int tmax, char* start,
 		var->psiab[k] = gsl_sf_psi(var->a[k] + var->b[k]);
 	}
 
-
+	//variational params for fitting an approximate LDA to estimate topic proportions
+	double* ldaalpha;
+	double** ldaphi;
+	double* ldaoldphi;
+	ldaphi = malloc(sizeof(double*)*nmax);
+	for (n = 0; n < nmax; n++){
+		ldaphi[n] = malloc(sizeof(double)*model->k);
+		for (k = 0; k < model->k; k++){
+			ldaphi[n][k] = 0.0;
+		}
+	}
+	ldaalpha = malloc(sizeof(double)*model->k);
+	ldaoldphi = malloc(sizeof(double)*model->k);
 
     iteration = 0;
     sprintf(filename, "%s/%03d", dir,iteration);
@@ -243,7 +255,7 @@ void StochVB(char* dataset, char* test_dataset, int kmax, int tmax, char* start,
 			// compute lkh on test set
 
 			//alternative method for estimating tpc prop for each doc
-			hdp_lda_est(test_corpus, model, var, test_theta, nmax);
+			hdp_lda_est(test_corpus, model, var, test_theta, ldaphi, ldaoldphi, ldaalpha);
 
 
 			lhood = 0.0;
@@ -294,7 +306,7 @@ void StochVB(char* dataset, char* test_dataset, int kmax, int tmax, char* start,
 	fclose(lhood_fptr);
 
 	// final estimate on the test set
-	hdp_lda_est(test_corpus, model, var, test_theta, nmax);
+	hdp_lda_est(test_corpus, model, var, test_theta, ldaphi, ldaoldphi, ldaalpha);
 	sprintf(filename, "%s/testfinal.theta", dir);
 	fp = fopen(filename, "w");
 	for (d = 0; d < test_corpus->ndocs; d++){
@@ -306,7 +318,7 @@ void StochVB(char* dataset, char* test_dataset, int kmax, int tmax, char* start,
 	fclose(fp);
 
 	//final estimate on training set
-	hdp_lda_est(corpus, model, var, theta, nmax);
+	hdp_lda_est(corpus, model, var, theta, ldaphi, ldaoldphi, ldaalpha);
 
     sprintf(filename, "%s/final", dir);
     write_hdplda_model(model, var, filename, corpus, theta);
@@ -478,8 +490,22 @@ void BatchVB(char* dataset, int kmax, int tmax, char* start, char* dir,
 	}while((iteration < MAXITER) && (conv > CONVERGED));
 	fclose(lhood_fptr);
 
+	//variational params for fitting an approximate LDA to estimate topic proportions
+	double* ldaalpha;
+	double** ldaphi;
+	double* ldaoldphi;
+	ldaphi = malloc(sizeof(double*)*nmax);
+	for (n = 0; n < nmax; n++){
+		ldaphi[n] = malloc(sizeof(double)*model->k);
+		for (k = 0; k < model->k; k++){
+			ldaphi[n][k] = 0.0;
+		}
+	}
+	ldaalpha = malloc(sizeof(double)*model->k);
+	ldaoldphi = malloc(sizeof(double)*model->k);
+
 	//alternative method for estimating tpc prop for each doc
-	hdp_lda_est(corpus, model, var, theta, nmax);
+	hdp_lda_est(corpus, model, var, theta, ldaphi, ldaoldphi, ldaalpha);
 
     sprintf(filename, "%s/final", dir);
 
@@ -571,103 +597,14 @@ void doc_init_vars(hdplda_corpus* corpus, hdplda_model* model,
 			var->phiss1[t] = var->phiss1[t-1] + var->Psigamma[t-1][1] - var->Psisumgamma[t-1];
 		}
 
-
-	// init vars for this doc
-	/*for (t = 0; t < model->t; t++){
-		var->sumphi[t][0] = 0.0;
-		var->sumphi[t][1] = 0.0;
-		if (t > 0){
-			for (k = 0; k < model->k; k++){
-				var->xi[t][k] = var->xi[0][k];
-				var->xiss2[t][k] = 0.0;
-			}
-		}else{
-			maxval = -1e50;
-			for (k = 0; k < model->k; k++){
-				var->xi[t][k] = var->psia[k] - var->psiab[k] + var->xiss1[k];
-				for (n = 0; n < corpus->docs[d].length; n++){
-					w = corpus->docs[d].words[n];
-					c = (double) corpus->docs[d].counts[n];
-					var->xi[t][k] += c*model->Elogbeta[k][w];
-				}
-				if (var->xi[t][k] > maxval)
-					maxval = var->xi[t][k];
-			}
-			normsum = 0.0;
-			for (k = 0; k < model->k; k++){
-				var->xi[t][k] = exp(var->xi[t][k] - maxval);
-				normsum += var->xi[t][k];
-			}
-			for (k = 0; k < model->k; k++){
-				var->xi[t][k] /= normsum;
-				var->xiss2[t][k] = 0.0;
-			}
-		}
-	}
-	// init phi
-	sumphitotal = 0.0;
-	for (n = 0; n < corpus->docs[d].length; n++){
-		w = corpus->docs[d].words[n];
-		c = (double) corpus->docs[d].counts[n];
-		maxval = -1e50;
-		for (t = 0; t < model->t; t++){
-			var->phi[n][t] = 0.0;
-			for (k = 0; k < model->k; k++){
-				var->phi[n][t] += var->xi[t][k]*model->Elogbeta[k][w];
-			}
-			if (var->phi[n][t] > maxval)
-				maxval = var->phi[n][t];
-		}
-		normsum = 0.0;
-		for (t = 0; t < model->t; t++){
-			var->phi[n][t] = exp(var->phi[n][t] - maxval);
-			normsum += var->phi[n][t];
-		}
-		for (t = 0; t < model->t; t++){
-			var->phi[n][t] /= normsum;
-			var->sumphi[t][0] += c*var->phi[n][t];
-			sumphitotal += c*var->phi[n][t];
-			for (k = 0; k < model->k; k++){
-				if (n == 0) var->xiss2[t][k] = 0.0;
-				var->xiss2[t][k] += c*var->phi[n][t]*model->Elogbeta[k][w];
-			}
-		}
-	}
-	for (t = model->t-1; t >= 0; t--){
-		if (t < model->t-1) var->sumphi[t][1] = var->sumphi[t+1][1] + var->sumphi[t+1][0];
-		else var->sumphi[t][1] = 0.0;
-		var->gamma[t][0] = 1 + var->sumphi[t][0];
-		var->gamma[t][1] = model->alpha + var->sumphi[t][1];
-		var->Psigamma[t][0] = gsl_sf_psi(var->gamma[t][0]);
-		var->Psigamma[t][1] = gsl_sf_psi(var->gamma[t][1]);
-		var->sumgamma[t] = var->gamma[t][0] + var->gamma[t][1];
-		var->Psisumgamma[t] = gsl_sf_psi(var->sumgamma[t]);
-	}
-	// update phiss
-	var->phiss1[0] = 0.0;
-	for (t = 1; t < model->t; t++){
-		var->phiss1[t] = var->phiss1[t-1] + var->Psigamma[t-1][1] - var->Psisumgamma[t-1];
-	}*/
-
 }
 
 void hdp_lda_est(hdplda_corpus* corpus, hdplda_model* model,
-		hdplda_var* var, double** theta, int nmax){
+		hdplda_var* var, double** theta, double** phi, double* oldphi, double* alpha){
 
 	int k, d, n, iter, w;
 	double lkh, conv, prev_lkh, left, temp, normsum, c, sumgamma;
-	double* alpha;
-	double** phi;
-	double* oldphi;
-	phi = malloc(sizeof(double*)*nmax);
-	for (n = 0; n < nmax; n++){
-		phi[n] = malloc(sizeof(double)*model->k);
-		for (k = 0; k < model->k; k++){
-			phi[n][k] = 0.0;
-		}
-	}
-	alpha = malloc(sizeof(double)*model->k);
-	oldphi = malloc(sizeof(double)*model->k);
+
 
 	k = 0;
 	temp = var->a[k]/(var->a[k]+var->b[k]);
@@ -757,9 +694,6 @@ void hdp_lda_est(hdplda_corpus* corpus, hdplda_model* model,
 
 
 	}
-
-	free(phi);
-	free(alpha);
 
 }
 
@@ -1047,8 +981,22 @@ void test(char* dataset, char* model_name, char* dir)
 	fclose(lhood_fptr);
 	//*************************************
 
+	//variational params for fitting an approximate LDA to estimate topic proportions
+	double* ldaalpha;
+	double** ldaphi;
+	double* ldaoldphi;
+	ldaphi = malloc(sizeof(double*)*nmax);
+	for (n = 0; n < nmax; n++){
+		ldaphi[n] = malloc(sizeof(double)*model->k);
+		for (k = 0; k < model->k; k++){
+			ldaphi[n][k] = 0.0;
+		}
+	}
+	ldaalpha = malloc(sizeof(double)*model->k);
+	ldaoldphi = malloc(sizeof(double)*model->k);
+
 	//alternative method for estimating tpc prop for each doc
-	hdp_lda_est(corpus, model, var, theta, nmax);
+	hdp_lda_est(corpus, model, var, theta, ldaphi, ldaoldphi, ldaalpha);
 
 	sprintf(filename, "%s/testfinal", dir);
 	write_hdplda_model(model, var, filename, corpus, theta);

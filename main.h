@@ -33,7 +33,7 @@ void StochVB(char* dataset, char* test_data, int kmax, int tmax, char* start, ch
 void doc_init_vars(hdplda_corpus* corpus, hdplda_model* model,
 		hdplda_var* var, hdplda_ss* ss, int d);
 void hdp_lda_est(hdplda_corpus* corpus, hdplda_model* model,
-		hdplda_var* var, double** theta, int nmax);
+		hdplda_var* var, double** theta, double** phi, double* oldphi, double* alpha);
 
 int main(int argc, char* argv[]);
 void write_hdplda_model(hdplda_model * model, hdplda_var* var, char * root,hdplda_corpus * corpus, double** theta);
